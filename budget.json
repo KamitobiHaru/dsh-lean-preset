@@ -1,0 +1,47 @@
+{
+  "measuredAt": "2026-10-19T07:49:07.591Z",
+  "dshVersion": "0.2.0-rc.2",
+  "sessionId": "session-0c0f8189-8912-4c66-82f8-7fe371615d75",
+  "preset": "lean",
+  "cwd": "/tmp/lean-probe",
+  "route": {
+    "provider": "opencode-go",
+    "model": "deepseek-v4.1-flash",
+    "maxTokens": 384000,
+    "contextWindow": 1000000
+  },
+  "toolCount": 2,
+  "tools": [
+    {
+      "name": "bash",
+      "chars": 854,
+      "tokens": 214
+    },
+    {
+      "name": "read_image",
+      "chars": 389,
+      "tokens": 97
+    }
+  ],
+  "toolChars": 1243,
+  "toolTokens": 311,
+  "promptParts": 1,
+  "promptChars": 46,
+  "promptTokens": 12,
+  "promptUpdates": 0,
+  "runtimeContextCount": 0,
+  "runtimeContextChars": 0,
+  "runtimeContextTokens": 0,
+  "totalChars": 1289,
+  "totalTokens": 322,
+  "headers": 1,
+  "policy": {
+    "thresholdRatio": 0.4,
+    "retainRatio": 0.05,
+    "spec": {
+      "thresholdTokens": 400000,
+      "retainTokens": 30800,
+      "binding": "ratio"
+    }
+  }
+}

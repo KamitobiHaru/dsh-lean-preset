@@ -1,0 +1,129 @@
+# dsh-lean-preset - GENERATED FILE, do not hand-edit.
+#
+# Adds one @deepseek-ai/dsh-agent-preset row per tool mask (lean):
+# the shipped `minimal` preset, verbatim, plus the shipped `standard` preset's
+# compaction group (whose `compaction-basic` row carries one `!!js` expression)
+# and filesystem row, plus the bundle's `tool-gate` plugin.
+#
+# `tool-gate` hides the tools that row registers together but this preset does
+# not want (read/write/edit), per agent, before its first
+# request. That is why only `read_image` reaches the model.
+#
+# The compaction expression reads HARNESS_COMPACTION_THRESHOLD_RATIO (or
+# DSH_COMPACTION_THRESHOLD_RATIO) and HARNESS_COMPACTION_RETAIN_RATIO (or DSH_COMPACTION_RETAIN_RATIO) at boot and
+# returns the policy; the retained tail defaults to min(0.05, threshold / 2) so a tiny
+# threshold cannot trip compaction-basic's retainRatio < thresholdRatio check.
+#
+# This bundle never patches `agent-preset-registry`, so it cannot fight another
+# preset bundle over the profile default. Pick this preset per session, or set a
+# profile default yourself.
+#
+# source: @deepseek-ai/dsh-web-app/presets/minimal.patch.yml
+#         @deepseek-ai/dsh-web-app/presets/standard.patch.yml
+# dsh:    0.2.0-rc.2
+# sha256: 71ef887f43d8a37931ba3b014e5b116f79018af873d06625fb22e280a23c1dfc  (minimal)
+#         6cd2f197737fc94a45e487d0bb57869461dd6f392d45f6429b576e75d973eda8  (standard)
+#
+# Regenerate with `node scripts/sync.mjs`; detect upstream drift with
+# `node scripts/check.mjs`; prove the result with `node scripts/verify.mjs`.
+- insert:
+    - id: preset-lean
+      name: '@deepseek-ai/dsh-agent-preset'
+      config:
+        id: lean
+        name: 轻量
+        description: 极简模式加上自动压缩与图像读取。
+        order: 5
+        plugins:
+          - id: persona
+            name: '@deepseek-ai/dsh-persona'
+            config:
+              prefix: You are a helpful software engineer assistant.
+              complete: true
+              includeRuntimeContext: false
+          - id: persistent-shell
+            name: cordis:group
+            group: true
+            isolate:
+              terminals: true
+            config:
+              - id: pty
+                name: '@deepseek-ai/dsh-terminal'
+              - id: terminal-bash
+                name: '@deepseek-ai/dsh-terminal-bash'
+                disabled: !!js process.platform === 'win32'
+                config:
+                  timeoutMs: 300000
+              - id: persistent-bash
+                name: '@deepseek-ai/dsh-tool-bash-persistent'
+                disabled: !!js process.platform === 'win32'
+                config:
+                  timeoutMs: 300000
+                  description: |-
+                    Run commands in a bash shell
+                    * When invoking this tool, the contents of the "command" parameter does NOT need to be XML-escaped.
+                    * Network access depends on the task environment. Prefer configured mirrors/proxies when they are available.
+                    * State is persistent across command calls and discussions with the user.
+                    * To inspect a particular line range of a file, e.g. lines 10-25, try 'sed -n 10,25p /path/to/the/file'.
+                    * Please avoid commands that may produce a very large amount of output.
+                    * For long lived commands use `nohup <cmd> > /tmp/<name>.log 2>&1 &` and poll that log with tail/grep; never leave a foreground command waiting.
+              - id: terminal-pwsh
+                name: '@deepseek-ai/dsh-terminal-bash'
+                disabled: !!js process.platform !== 'win32'
+                config:
+                  shellDialect: pwsh
+                  timeoutMs: 300000
+              - id: persistent-pwsh
+                name: '@deepseek-ai/dsh-tool-pwsh-persistent'
+                disabled: !!js process.platform !== 'win32'
+                config:
+                  timeoutMs: 300000
+                  description: |-
+                    Run commands in a PowerShell shell
+                    * When invoking this tool, the contents of the "command" parameter does NOT need to be XML-escaped.
+                    * You don't have access to the internet via this tool.
+                    * State is persistent across command calls and discussions with the user.
+                    * Use native Windows paths (C:\...) and $env:NAME variables; this is PowerShell, not bash.
+                    * Please avoid commands that may produce a very large amount of output.
+                    * For long lived commands use `Start-Process -NoNewWindow -RedirectStandardOutput <log> <cmd>` and poll that log; never leave a foreground command waiting.
+          - id: compaction
+            name: cordis:group
+            group: true
+            isolate:
+              compaction: true
+              toolResultPruner: true
+            config:
+              - id: compaction-basic
+                name: '@deepseek-ai/dsh-compaction-basic'
+                config: !!js |-
+                  (() => {
+                    const env = process.env;
+                    const thresholdRatio = Number(env.HARNESS_COMPACTION_THRESHOLD_RATIO ?? env.DSH_COMPACTION_THRESHOLD_RATIO ?? 0.4);
+                    const retainRatio = Number(env.HARNESS_COMPACTION_RETAIN_RATIO ?? env.DSH_COMPACTION_RETAIN_RATIO ?? Math.min(0.05, thresholdRatio / 2));
+                    if (!(thresholdRatio > 0 && thresholdRatio <= 1)) {
+                      throw new Error('compaction threshold ratio must be in (0, 1], got ' + thresholdRatio + '; set HARNESS_COMPACTION_THRESHOLD_RATIO');
+                    }
+                    if (!(retainRatio > 0 && retainRatio < thresholdRatio)) {
+                      throw new Error('compaction retain ratio must be in (0, ' + thresholdRatio + '), got ' + retainRatio + '; set HARNESS_COMPACTION_RETAIN_RATIO');
+                    }
+                    return { thresholdRatio, retainRatio };
+                  })()
+              - id: command-compact
+                name: '@deepseek-ai/dsh-command-compact'
+              - id: tool-result-pruner
+                name: '@deepseek-ai/dsh-compaction-tool-result-pruner'
+                config:
+                  thresholdChars: 8192
+                  headChars: 4096
+                  tailChars: 1024
+          - id: tool-fs
+            name: '@deepseek-ai/dsh-tool-fs'
+          - id: tool-gate
+            name: dsh-lean-preset/gate/index.js
+            config:
+              preset: lean
+              deny:
+                - read
+                - write
+                - edit
+              scope: root

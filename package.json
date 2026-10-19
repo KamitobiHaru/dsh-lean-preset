@@ -1,0 +1,13 @@
+{
+  "name": "dsh-lean-preset",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "description": "DSH bundle: a lean agent preset (the shipped minimal preset plus automatic compaction and image reading) and a startup tool gate.",
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}

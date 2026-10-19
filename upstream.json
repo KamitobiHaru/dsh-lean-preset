@@ -1,0 +1,14 @@
+{
+  "dshVersion": "0.2.0-rc.2",
+  "sources": {
+    "minimal": {
+      "path": "/data3/zsy/node-v24.18.0-linux-x64/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-web-app/presets/minimal.patch.yml",
+      "sha256": "71ef887f43d8a37931ba3b014e5b116f79018af873d06625fb22e280a23c1dfc"
+    },
+    "standard": {
+      "path": "/data3/zsy/node-v24.18.0-linux-x64/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-web-app/presets/standard.patch.yml",
+      "sha256": "6cd2f197737fc94a45e487d0bb57869461dd6f392d45f6429b576e75d973eda8"
+    }
+  },
+  "generatedAt": "2026-10-19T07:34:19.674Z"
+}
