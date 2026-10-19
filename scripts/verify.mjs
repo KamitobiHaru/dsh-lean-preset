@@ -416,14 +416,54 @@ check('the gate mask names real tools of the shipped filesystem package', () => 
   }
 });
 
-check('README documents the shipped version and the kept tool', () => {
-  const readme = join(root, 'README.md');
-  if (!existsSync(readme)) return;
-  const text = readFileSync(readme, 'utf8');
+const READMES = [
+  { file: 'README.md', other: 'README.zh.md', upgrade: '## Upgrade' },
+  { file: 'README.zh.md', other: 'README.md', upgrade: '## 升级' }
+];
+
+/** Maintainer-facing material belongs in MAINTAINING.md, not in the user README. */
+const README_BANNED = [
+  '本机',
+  '维护与发版',
+  'Maintenance and release',
+  'MASK_VARIANTS',
+  'HARNESS_COMPACTION_THRESHOLD_RATIO'
+];
+
+check('every README documents the shipped version, the tools and the upgrade path', () => {
   const version = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).version;
-  assert(text.includes(`#v${version}`), `README does not carry the install spec for v${version}`);
-  assert(text.includes(L.KEPT_TOOL_NAME), 'README does not name the kept tool');
-  assert(text.includes('nohup'), 'README does not document the nohup recipe the dropped background tools leave behind');
+  for (const { file, other, upgrade } of READMES) {
+    const path = join(root, file);
+    assert(existsSync(path), `${file} is missing`);
+    const text = readFileSync(path, 'utf8');
+    assert(text.includes(`#v${version}`), `${file} does not carry the install spec for v${version}`);
+    assert(text.includes(L.KEPT_TOOL_NAME), `${file} does not name the kept tool`);
+    assert(text.includes('nohup'), `${file} does not document the nohup recipe the dropped background tools leave behind`);
+    assert(text.includes('轻量'), `${file} does not name the preset card users must pick`);
+    assert(text.includes(`](${other})`), `${file} does not link ${other}`);
+    assert(text.includes(upgrade), `${file} does not carry the upgrade section ${JSON.stringify(upgrade)}`);
+  }
+});
+
+check('the READMEs stay user-facing and structurally parallel', () => {
+  const headings = [];
+  for (const { file } of READMES) {
+    const text = readFileSync(join(root, file), 'utf8');
+    for (const token of README_BANNED) {
+      assert(!text.includes(token), `${file} carries maintainer-only content ${JSON.stringify(token)}`);
+    }
+    headings.push(text.match(/^## /gmu)?.length ?? 0);
+  }
+  assert(headings[0] === headings[1] && headings[0] >= 8, `the two READMEs list ${headings.join(' and ')} top-level sections; they must match and cover the user path`);
+});
+
+check('MAINTAINING.md keeps the workflow the READMEs no longer carry', () => {
+  const path = join(root, 'MAINTAINING.md');
+  assert(existsSync(path), 'MAINTAINING.md is missing');
+  const text = readFileSync(path, 'utf8');
+  for (const token of ['sync.mjs', 'verify.mjs', 'check.mjs', 'DESCRIPTION_EDITS', 'MASK_VARIANTS']) {
+    assert(text.includes(token), `MAINTAINING.md does not cover ${token}`);
+  }
 });
 
 check('the operator script parses and reads its knobs from lib.mjs', () => {
