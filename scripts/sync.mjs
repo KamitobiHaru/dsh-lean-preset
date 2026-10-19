@@ -65,13 +65,35 @@ const header = [
 ].join('\n');
 
 writeFileSync(join(root, 'cordis.patch.yml'), header + L.dumpEntryList(tools, patches));
-writeFileSync(join(root, 'upstream.json'), `${JSON.stringify({
+
+/**
+ * Keep the previous timestamp when only the timestamp would change, so a
+ * no-op regeneration leaves the worktree clean.
+ * @param path - the upstream.json being rewritten.
+ * @param next - the document without its timestamp.
+ * @returns the previous timestamp, or undefined when the content moved.
+ */
+function unchangedStamp(path, next) {
+  try {
+    const { generatedAt, ...rest } = JSON.parse(readFileSync(path, 'utf8'));
+    if (typeof generatedAt !== 'string' || JSON.stringify(rest) !== JSON.stringify(next)) return undefined;
+    return generatedAt;
+  } catch {
+    return undefined;
+  }
+}
+
+const upstreamPath = join(root, 'upstream.json');
+const upstream = {
   dshVersion: version,
   sources: {
     minimal: { path: minimalSource, sha256: L.sha256(minimalText) },
     standard: { path: standardSource, sha256: L.sha256(standardText) }
-  },
-  generatedAt: new Date().toISOString()
+  }
+};
+writeFileSync(upstreamPath, `${JSON.stringify({
+  ...upstream,
+  generatedAt: unchangedStamp(upstreamPath, upstream) ?? new Date().toISOString()
 }, null, 2)}\n`);
 
 process.stdout.write(`wrote cordis.patch.yml for preset(s) ${variants}\n`);
