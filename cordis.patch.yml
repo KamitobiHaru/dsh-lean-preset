@@ -9,10 +9,12 @@
 # not want (read/write/edit), per agent, before its first
 # request. That is why only `read_image` reaches the model.
 #
-# The compaction expression reads HARNESS_COMPACTION_THRESHOLD_RATIO (or
-# DSH_COMPACTION_THRESHOLD_RATIO) and HARNESS_COMPACTION_RETAIN_RATIO (or DSH_COMPACTION_RETAIN_RATIO) at boot and
-# returns the policy; the retained tail defaults to min(0.05, threshold / 2) so a tiny
-# threshold cannot trip compaction-basic's retainRatio < thresholdRatio check.
+# The compaction expression reads HARNESS_LEAN_COMPACTION_THRESHOLD_RATIO and
+# HARNESS_LEAN_COMPACTION_RETAIN_RATIO at boot and returns only what they set: with neither set,
+# this preset imposes no policy at all and the harness defaults apply, so a DSH
+# upgrade moves the preset with it. Set the knobs per machine in $DSH_HOME/.env
+# (see scripts/set-compaction.mjs); dsh-compaction-tune's HARNESS_COMPACTION_*
+# names deliberately do not reach this preset.
 #
 # This bundle never patches `agent-preset-registry`, so it cannot fight another
 # preset bundle over the profile default. Pick this preset per session, or set a
@@ -98,15 +100,28 @@
                 config: !!js |-
                   (() => {
                     const env = process.env;
-                    const thresholdRatio = Number(env.HARNESS_COMPACTION_THRESHOLD_RATIO ?? env.DSH_COMPACTION_THRESHOLD_RATIO ?? 0.4);
-                    const retainRatio = Number(env.HARNESS_COMPACTION_RETAIN_RATIO ?? env.DSH_COMPACTION_RETAIN_RATIO ?? Math.min(0.05, thresholdRatio / 2));
-                    if (!(thresholdRatio > 0 && thresholdRatio <= 1)) {
-                      throw new Error('compaction threshold ratio must be in (0, 1], got ' + thresholdRatio + '; set HARNESS_COMPACTION_THRESHOLD_RATIO');
+                    const read = (name) => {
+                      const raw = env[name];
+                      if (raw === undefined || raw.trim() === '') return undefined;
+                      const value = Number(raw);
+                      if (!Number.isFinite(value)) throw new Error('compaction ' + name + ' must be a number, got ' + raw);
+                      return value;
+                    };
+                    const thresholdRatio = read('HARNESS_LEAN_COMPACTION_THRESHOLD_RATIO');
+                    const retainRatio = read('HARNESS_LEAN_COMPACTION_RETAIN_RATIO');
+                    if (thresholdRatio !== undefined && !(thresholdRatio > 0 && thresholdRatio <= 1)) {
+                      throw new Error('compaction threshold ratio must be in (0, 1], got ' + thresholdRatio + '; set HARNESS_LEAN_COMPACTION_THRESHOLD_RATIO');
                     }
-                    if (!(retainRatio > 0 && retainRatio < thresholdRatio)) {
-                      throw new Error('compaction retain ratio must be in (0, ' + thresholdRatio + '), got ' + retainRatio + '; set HARNESS_COMPACTION_RETAIN_RATIO');
+                    if (retainRatio !== undefined && !(retainRatio > 0)) {
+                      throw new Error('compaction retain ratio must be positive, got ' + retainRatio + '; set HARNESS_LEAN_COMPACTION_RETAIN_RATIO');
                     }
-                    return { thresholdRatio, retainRatio };
+                    if (thresholdRatio !== undefined && retainRatio !== undefined && !(retainRatio < thresholdRatio)) {
+                      throw new Error('compaction retain ratio must be less than the threshold ratio ' + thresholdRatio + ', got ' + retainRatio);
+                    }
+                    const policy = {};
+                    if (thresholdRatio !== undefined) policy.thresholdRatio = thresholdRatio;
+                    if (retainRatio !== undefined) policy.retainRatio = retainRatio;
+                    return policy;
                   })()
               - id: command-compact
                 name: '@deepseek-ai/dsh-command-compact'

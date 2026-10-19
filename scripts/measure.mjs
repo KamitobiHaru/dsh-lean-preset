@@ -159,11 +159,25 @@ export function analyse(events, file) {
   };
 }
 
-/** Effective compaction policy for one route, from the same arithmetic the plugin uses. */
+/**
+ * The policy this bundle's preset resolves right now: the two knobs over the
+ * harness defaults, plus the resulting trigger/retention for one route.
+ */
 function policyFor(model) {
   if (model?.contextWindow === undefined) return undefined;
-  const floor = L.withEnv({}, () => L.evaluateExpression({ process }, L.EXPRESSION));
-  return { ...floor, spec: L.compactSpec({ label: `${model.provider}/${model.model}`, contextWindow: model.contextWindow, reservedCompletionTokens: model.maxTokens }, floor.thresholdRatio, floor.retainRatio) };
+  let defaults;
+  try {
+    defaults = L.installedCompactionDefaults(L.resolveInstallDir());
+  } catch (error) {
+    return { note: `cannot read the harness compaction defaults: ${error.message}` };
+  }
+  const partial = L.withEnv({}, () => L.evaluateExpression({ process }, L.EXPRESSION));
+  const policy = L.resolvePolicy(defaults, partial);
+  return {
+    ...policy,
+    overridden: Object.keys(partial).length > 0,
+    spec: L.compactSpec({ label: `${model.provider}/${model.model}`, contextWindow: model.contextWindow, reservedCompletionTokens: model.maxTokens }, policy)
+  };
 }
 
 function report(measured, policy) {
@@ -174,7 +188,8 @@ function report(measured, policy) {
     lines.push(`route    ${measured.route.provider}/${measured.route.model}  contextWindow ${measured.route.contextWindow ?? '(unrecorded)'}  maxTokens ${measured.route.maxTokens ?? '(none)'}`);
   }
   if (policy !== undefined) {
-    lines.push(`compact  trigger ${policy.spec.thresholdTokens} tokens, retain ${policy.spec.retainTokens ?? '?'} tokens (ratio ${policy.thresholdRatio} / ${policy.retainRatio}, ${policy.spec.binding ?? policy.spec.error})`);
+    if (policy.note !== undefined) lines.push(`compact  ${policy.note}`);
+    else lines.push(`compact  trigger ${policy.spec.thresholdTokens} tokens, retain ${policy.spec.retainTokens ?? '?'} tokens (ratio ${policy.thresholdRatio} / ${policy.retainRatio}, ${policy.spec.binding ?? policy.spec.error}${policy.overridden ? ', overridden by HARNESS_LEAN_*' : ', harness defaults'})`);
   }
   lines.push('');
   lines.push(`tools (${measured.toolCount})  ${measured.toolChars} chars  ~${measured.toolTokens} tokens`);

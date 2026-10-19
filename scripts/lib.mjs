@@ -78,42 +78,56 @@ export const GATE_ROW_ID = 'tool-gate';
  */
 export const GATE_ROW_NAME = `${PACKAGE_NAME}/gate/index.js`;
 
-export const THRESHOLD_ENV = 'HARNESS_COMPACTION_THRESHOLD_RATIO';
-export const RETAIN_ENV = 'HARNESS_COMPACTION_RETAIN_RATIO';
-export const THRESHOLD_ENV_ALIAS = 'DSH_COMPACTION_THRESHOLD_RATIO';
-export const RETAIN_ENV_ALIAS = 'DSH_COMPACTION_RETAIN_RATIO';
-export const ENV_KEYS = [THRESHOLD_ENV, RETAIN_ENV, THRESHOLD_ENV_ALIAS, RETAIN_ENV_ALIAS];
-export const DEFAULT_THRESHOLD_RATIO = 0.4;
 /**
- * Retained verbatim tail as a fraction of the message budget
- * (`contextWindow - maxTokens`). 0.05 keeps ~31K tokens on a 1M/384K route and
- * ~46K on a 1M/131K route: in the 30-50K band other agents effectively keep.
- * The derived fallback `min(0.05, threshold/2)` still shrinks it for
- * deliberately tiny test thresholds.
+ * Compaction knobs for the lean preset.
+ *
+ * This bundle deliberately ships NO compaction policy: unset knobs fall through
+ * to whatever the harness itself defaults to, so the preset follows the
+ * deployment instead of imposing a trigger. These two names only exist so one
+ * machine can raise or lower that trigger for this preset alone; they are
+ * separate from `dsh-compaction-tune`'s `HARNESS_COMPACTION_*`, which keeps
+ * that preset's aggressive tuning out of `/lean`.
  */
-export const DEFAULT_RETAIN_RATIO = 0.05;
-export const HEADROOM_TOKENS = 65536;
+export const THRESHOLD_ENV = 'HARNESS_LEAN_COMPACTION_THRESHOLD_RATIO';
+export const RETAIN_ENV = 'HARNESS_LEAN_COMPACTION_RETAIN_RATIO';
+export const ENV_KEYS = [THRESHOLD_ENV, RETAIN_ENV];
+/** Names this preset must ignore so it never inherits another bundle's policy. */
+export const FOREIGN_ENV_KEYS = ['HARNESS_COMPACTION_THRESHOLD_RATIO', 'HARNESS_COMPACTION_RETAIN_RATIO', 'DSH_COMPACTION_THRESHOLD_RATIO', 'DSH_COMPACTION_RETAIN_RATIO'];
 
 /**
- * The single `!!js` expression this bundle injects into the preset's
- * `compaction-basic` row, generated from the two defaults above so the file
- * cannot drift from them. Re-run `sync.mjs` after editing; `verify.mjs` checks
- * the generated text against this constant.
+ * The `!!js` expression this bundle injects into the preset's `compaction-basic`
+ * row. It reads the two knobs above and returns only what they set; with
+ * neither set it returns an empty object, which leaves every field to the
+ * plugin's own defaults. So the effective policy is the harness's, and it
+ * follows a DSH upgrade automatically.
  *
- * It reads the same environment names as `dsh-compaction-tune`, so one
- * `HARNESS_COMPACTION_*` setting drives both presets.
+ * Only `0` and `1` appear as literals, and nothing else is numeric: `verify.mjs`
+ * asserts that no ratio is baked in here.
  */
 export const EXPRESSION = `(() => {
   const env = process.env;
-  const thresholdRatio = Number(env.HARNESS_COMPACTION_THRESHOLD_RATIO ?? env.DSH_COMPACTION_THRESHOLD_RATIO ?? ${DEFAULT_THRESHOLD_RATIO});
-  const retainRatio = Number(env.HARNESS_COMPACTION_RETAIN_RATIO ?? env.DSH_COMPACTION_RETAIN_RATIO ?? Math.min(${DEFAULT_RETAIN_RATIO}, thresholdRatio / 2));
-  if (!(thresholdRatio > 0 && thresholdRatio <= 1)) {
-    throw new Error('compaction threshold ratio must be in (0, 1], got ' + thresholdRatio + '; set HARNESS_COMPACTION_THRESHOLD_RATIO');
+  const read = (name) => {
+    const raw = env[name];
+    if (raw === undefined || raw.trim() === '') return undefined;
+    const value = Number(raw);
+    if (!Number.isFinite(value)) throw new Error('compaction ' + name + ' must be a number, got ' + raw);
+    return value;
+  };
+  const thresholdRatio = read('${THRESHOLD_ENV}');
+  const retainRatio = read('${RETAIN_ENV}');
+  if (thresholdRatio !== undefined && !(thresholdRatio > 0 && thresholdRatio <= 1)) {
+    throw new Error('compaction threshold ratio must be in (0, 1], got ' + thresholdRatio + '; set ${THRESHOLD_ENV}');
   }
-  if (!(retainRatio > 0 && retainRatio < thresholdRatio)) {
-    throw new Error('compaction retain ratio must be in (0, ' + thresholdRatio + '), got ' + retainRatio + '; set HARNESS_COMPACTION_RETAIN_RATIO');
+  if (retainRatio !== undefined && !(retainRatio > 0)) {
+    throw new Error('compaction retain ratio must be positive, got ' + retainRatio + '; set ${RETAIN_ENV}');
   }
-  return { thresholdRatio, retainRatio };
+  if (thresholdRatio !== undefined && retainRatio !== undefined && !(retainRatio < thresholdRatio)) {
+    throw new Error('compaction retain ratio must be less than the threshold ratio ' + thresholdRatio + ', got ' + retainRatio);
+  }
+  const policy = {};
+  if (thresholdRatio !== undefined) policy.thresholdRatio = thresholdRatio;
+  if (retainRatio !== undefined) policy.retainRatio = retainRatio;
+  return policy;
 })()`;
 
 /** The Loader's own expression wrapper, so verification evaluates what DSH evaluates. */
@@ -312,15 +326,16 @@ export function buildPatchList(minimalEntries, standardEntries) {
   return [{ insert }];
 }
 
-/** Run `fn` with exactly the four knobs set to `values`, restoring the process afterwards. */
+/** Run `fn` with exactly the knobs set to `values`, restoring the process afterwards. */
 export function withEnv(values, fn) {
-  const saved = new Map(ENV_KEYS.map((key) => [key, process.env[key]]));
-  for (const key of ENV_KEYS) delete process.env[key];
+  const keys = [...ENV_KEYS, ...FOREIGN_ENV_KEYS];
+  const saved = new Map(keys.map((key) => [key, process.env[key]]));
+  for (const key of keys) delete process.env[key];
   for (const [key, value] of Object.entries(values)) process.env[key] = value;
   try {
     return fn();
   } finally {
-    for (const key of ENV_KEYS) {
+    for (const key of keys) {
       const value = saved.get(key);
       if (value === undefined) delete process.env[key];
       else process.env[key] = value;
@@ -345,6 +360,29 @@ export function packageToolNames(installDir, packageName) {
   const names = new Set();
   for (const match of source.matchAll(/defineTool\(\{\s*name: "([A-Za-z0-9_]+)"/gu)) names.add(match[1]);
   return [...names];
+}
+
+/**
+ * What the harness itself defaults to, read from the installed
+ * `@deepseek-ai/dsh-compaction-basic` source: this is the "system policy" the
+ * preset falls through to when neither knob is set. Read rather than hardcoded
+ * so a DSH upgrade that changes them changes the printed table too.
+ */
+export function installedCompactionDefaults(installDir) {
+  const require = createRequire(join(installDir, 'package.json'));
+  const file = require.resolve('@deepseek-ai/dsh-compaction-basic/package.json');
+  const source = readFileSync(join(dirname(file), 'lib', 'index.js'), 'utf8');
+  const constant = (name) => {
+    const match = source.match(new RegExp(`const ${name} = (-?[0-9.]+)`));
+    return match === null ? undefined : Number(match[1]);
+  };
+  const headroom = source.match(/config\.headroomTokens \?\? ([0-9]+)/u);
+  return {
+    thresholdRatio: constant('DEFAULT_THRESHOLD_RATIO'),
+    retainRatio: constant('DEFAULT_RETAIN_RATIO'),
+    headroomTokens: headroom === null ? undefined : Number(headroom[1]),
+    source: file
+  };
 }
 
 /**
@@ -402,17 +440,18 @@ export function collectProfileModels(options = {}) {
 
 /**
  * Mirror of `@deepseek-ai/dsh-compaction-basic`'s threshold/retention
- * arithmetic for one model and policy.
+ * arithmetic for one model and one resolved policy (ratios plus headroom).
  */
-export function compactSpec(model, thresholdRatio, retainRatio) {
+export function compactSpec(model, policy) {
+  const { thresholdRatio, retainRatio, headroomTokens } = policy;
   const ratioTerm = model.contextWindow * thresholdRatio;
   if (model.reservedCompletionTokens === undefined) {
     return { thresholdTokens: Math.floor(ratioTerm), binding: 'ratio term only; maxTokens not declared' };
   }
   const messageBudgetTokens = model.contextWindow - model.reservedCompletionTokens;
-  const pressureBudgetTokens = messageBudgetTokens - HEADROOM_TOKENS;
+  const pressureBudgetTokens = messageBudgetTokens - headroomTokens;
   if (pressureBudgetTokens <= 0) {
-    return { error: `pressure budget <= 0 (${model.contextWindow} - ${model.reservedCompletionTokens} - ${HEADROOM_TOKENS}); TargetPressureConfigError at runtime` };
+    return { error: `pressure budget <= 0 (${model.contextWindow} - ${model.reservedCompletionTokens} - ${headroomTokens}); TargetPressureConfigError at runtime` };
   }
   const thresholdTokens = Math.floor(Math.min(ratioTerm, pressureBudgetTokens));
   const retainTokens = Math.floor(messageBudgetTokens * retainRatio);
@@ -422,21 +461,31 @@ export function compactSpec(model, thresholdRatio, retainRatio) {
   return { thresholdTokens, retainTokens, binding: ratioTerm <= pressureBudgetTokens ? 'ratio' : 'headroom cap' };
 }
 
+/** One printed case: a label and the policy it resolves to. */
 export function formatSpecTable(cases, models = FALLBACK_MODELS) {
   if (models.length === 0) return '  (no models)';
   const lines = [];
   for (const model of models) {
     const declared = model.reservedCompletionTokens === undefined ? 'maxTokens not declared' : `maxTokens ${model.reservedCompletionTokens}`;
     lines.push(`  ${model.label}  (contextWindow ${model.contextWindow}, ${declared})`);
-    for (const [label, thresholdRatio, retainRatio] of cases) {
-      const spec = compactSpec(model, thresholdRatio, retainRatio);
+    for (const [label, policy] of cases) {
+      const spec = compactSpec(model, policy);
       const detail = spec.error !== undefined
         ? spec.error
         : spec.retainTokens === undefined
           ? `trigger <= ${spec.thresholdTokens} tokens (${spec.binding})`
           : `trigger ${spec.thresholdTokens} tokens, retain ${spec.retainTokens} tokens (${spec.binding})`;
-      lines.push(`    ${label.padEnd(26)} ratio ${String(thresholdRatio).padEnd(7)} retain ${String(retainRatio).padEnd(8)} -> ${detail}`);
+      lines.push(`    ${label.padEnd(26)} ratio ${String(policy.thresholdRatio).padEnd(7)} retain ${String(policy.retainRatio).padEnd(8)} -> ${detail}`);
     }
   }
   return lines.join('\n');
+}
+
+/** Merge partial knob values over the harness defaults into one resolved policy. */
+export function resolvePolicy(defaults, partial = {}) {
+  return {
+    thresholdRatio: partial.thresholdRatio ?? defaults.thresholdRatio,
+    retainRatio: partial.retainRatio ?? defaults.retainRatio,
+    headroomTokens: partial.headroomTokens ?? defaults.headroomTokens
+  };
 }

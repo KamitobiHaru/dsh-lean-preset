@@ -18,6 +18,7 @@
  * Usage: node scripts/verify.mjs [--install <dsh package dir>]
  *                               [--minimal <minimal.patch.yml>] [--standard <standard.patch.yml>]
  */
+import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -156,29 +157,52 @@ check('the compaction group is the shipped standard group with only the policy e
   }
 });
 
-check('the compaction expression resolves the documented defaults', () => {
-  const cases = [
-    [{}, 0.4, 0.05],
-    [{ [L.THRESHOLD_ENV]: '0.001' }, 0.001, 0.0005],
-    [{ [L.THRESHOLD_ENV]: '1' }, 1, 0.05],
-    [{ [L.THRESHOLD_ENV]: '0.2' }, 0.2, 0.05],
-    [{ [L.THRESHOLD_ENV]: '0.2', [L.RETAIN_ENV]: '0.01' }, 0.2, 0.01],
-    [{ [L.THRESHOLD_ENV_ALIAS]: '0.3', [L.RETAIN_ENV_ALIAS]: '0.02' }, 0.3, 0.02]
-  ];
-  for (const [env, thresholdRatio, retainRatio] of cases) {
-    const policy = L.withEnv(env, () => L.evaluateExpression({ process }, L.EXPRESSION));
-    assert(policy.thresholdRatio === thresholdRatio, `${JSON.stringify(env)}: threshold ${policy.thresholdRatio}, expected ${thresholdRatio}`);
-    assert(policy.retainRatio === retainRatio, `${JSON.stringify(env)}: retain ${policy.retainRatio}, expected ${retainRatio}`);
+check('the compaction expression ships no policy and reads only its own two knobs', () => {
+  const eval_ = (env) => L.withEnv(env, () => L.evaluateExpression({ process }, L.EXPRESSION));
+  // Nothing set: an empty object, so every field falls through to the harness.
+  same(eval_({}), {}, 'an unset preset must impose no compaction policy');
+  // The other bundle's machine-wide knobs must not reach this preset.
+  for (const key of L.FOREIGN_ENV_KEYS) {
+    same(eval_({ [key]: '0.001' }), {}, `${key} must not configure the lean preset`);
   }
-  for (const env of [{ [L.THRESHOLD_ENV]: '0' }, { [L.THRESHOLD_ENV]: '1.5' }, { [L.THRESHOLD_ENV]: 'nope' }, { [L.RETAIN_ENV]: '0.9' }]) {
+  // Each knob sets itself alone, leaving the other to the harness default.
+  same(eval_({ [L.THRESHOLD_ENV]: '0.2' }), { thresholdRatio: 0.2 }, 'threshold override');
+  same(eval_({ [L.RETAIN_ENV]: '0.05' }), { retainRatio: 0.05 }, 'retain override');
+  same(eval_({ [L.THRESHOLD_ENV]: '0.2', [L.RETAIN_ENV]: '0.01' }), { thresholdRatio: 0.2, retainRatio: 0.01 }, 'both knobs');
+  same(eval_({ [L.THRESHOLD_ENV]: '0.002' }), { thresholdRatio: 0.002 }, 'a tiny threshold');
+  same(eval_({ [L.THRESHOLD_ENV]: '   ' }), {}, 'a blank knob counts as unset');
+  for (const env of [{ [L.THRESHOLD_ENV]: '0' }, { [L.THRESHOLD_ENV]: '1.5' }, { [L.THRESHOLD_ENV]: 'nope' }, { [L.RETAIN_ENV]: '0' }, { [L.RETAIN_ENV]: '-1' }, { [L.THRESHOLD_ENV]: '0.1', [L.RETAIN_ENV]: '0.2' }]) {
     let threw = false;
     try {
-      L.withEnv(env, () => L.evaluateExpression({ process }, L.EXPRESSION));
+      eval_(env);
     } catch {
       threw = true;
     }
     assert(threw, `${JSON.stringify(env)} was accepted but should be rejected`);
   }
+});
+
+check('the shipped expression bakes in no ratio', () => {
+  const literal = L.EXPRESSION.match(/\d*\.\d+/u);
+  assert(literal === null, `the expression carries the numeric literal ${literal?.[0]}: a compaction policy must not be baked in`);
+  for (const key of [L.THRESHOLD_ENV, L.RETAIN_ENV]) {
+    assert(L.EXPRESSION.includes(key), `the expression does not read ${key}`);
+  }
+  for (const key of L.FOREIGN_ENV_KEYS) {
+    assert(!L.EXPRESSION.includes(key), `the expression reads ${key}, which belongs to another bundle`);
+  }
+});
+
+check('the preset defers to the installed compaction defaults', () => {
+  const defaults = L.installedCompactionDefaults(installDir);
+  assert(Number.isFinite(defaults.thresholdRatio) && Number.isFinite(defaults.retainRatio), `cannot read the harness compaction defaults from ${defaults.source}`);
+  assert(defaults.headroomTokens > 0, 'cannot read the harness headroom default');
+  const policy = L.resolvePolicy(defaults, L.withEnv({}, () => L.evaluateExpression({ process }, L.EXPRESSION)));
+  same(
+    { thresholdRatio: policy.thresholdRatio, retainRatio: policy.retainRatio, headroomTokens: policy.headroomTokens },
+    { thresholdRatio: defaults.thresholdRatio, retainRatio: defaults.retainRatio, headroomTokens: defaults.headroomTokens },
+    'an unset preset must resolve exactly the harness defaults'
+  );
 });
 
 check('the gate row names the bundle plugin and uses the variant mask', () => {
@@ -402,6 +426,17 @@ check('README documents the shipped version and the kept tool', () => {
   assert(text.includes('nohup'), 'README does not document the nohup recipe the dropped background tools leave behind');
 });
 
+check('the operator script parses and reads its knobs from lib.mjs', () => {
+  const script = join(root, 'scripts', 'set-compaction.mjs');
+  execFileSync(process.execPath, ['--check', script], { stdio: 'pipe' });
+  const source = readFileSync(script, 'utf8');
+  assert(source.includes("from './lib.mjs'"), 'set-compaction.mjs must import the shared constants');
+  assert(source.includes('L.ENV_KEYS'), 'set-compaction.mjs must iterate L.ENV_KEYS');
+  for (const key of [...L.ENV_KEYS, ...L.FOREIGN_ENV_KEYS]) {
+    assert(!source.includes(key), `set-compaction.mjs hardcodes ${key}; take it from L.ENV_KEYS so one rename reaches every script`);
+  }
+});
+
 check('budget.json records the measured request overhead', () => {
   const file = join(root, 'budget.json');
   if (!existsSync(file)) return;
@@ -413,11 +448,20 @@ check('budget.json records the measured request overhead', () => {
 
 process.stdout.write(`\n${failed === 0 ? 'all checks passed' : `${failed} check(s) failed`}\n`);
 
-process.stdout.write('\ncompaction policy this bundle ships:\n');
+process.stdout.write('\ncompaction policy this preset resolves:\n');
 const models = L.collectProfileModels({ profile: option('profile') ?? 'web', installDir });
 if (models.note !== undefined) process.stdout.write(`  (${models.note})\n`);
-process.stdout.write(`${L.formatSpecTable([['defaults', L.DEFAULT_THRESHOLD_RATIO, L.DEFAULT_RETAIN_RATIO], ['smoke 0.001', 0.001, 0.0005]], models.models)}\n`);
+const harnessDefaults = L.installedCompactionDefaults(installDir);
+const shipped = L.resolvePolicy(harnessDefaults, L.withEnv({}, () => L.evaluateExpression({ process }, L.EXPRESSION)));
+process.stdout.write(`  harness defaults from ${harnessDefaults.source}\n`);
+process.stdout.write(`    ratio ${harnessDefaults.thresholdRatio} / retain ${harnessDefaults.retainRatio}, headroom ${harnessDefaults.headroomTokens} tokens\n`);
+process.stdout.write(`${L.formatSpecTable([
+  ['shipped (no override)', shipped],
+  [`${L.THRESHOLD_ENV}=0.2`, L.resolvePolicy(harnessDefaults, { thresholdRatio: 0.2 })],
+  [`${L.THRESHOLD_ENV}=0.001`, L.resolvePolicy(harnessDefaults, { thresholdRatio: 0.001, retainRatio: 0.0005 })]
+], models.models)}\n`);
 for (const missing of models.missing) process.stdout.write(`  warning: ${missing.label} ${missing.reason}\n`);
-process.stdout.write('note: dsh-compaction-tune reads the same HARNESS_COMPACTION_* names, so one setting drives both presets.\n');
+process.stdout.write(`note: this preset reads only ${L.THRESHOLD_ENV} / ${L.RETAIN_ENV};\n`);
+process.stdout.write('      dsh-compaction-tune\'s HARNESS_COMPACTION_* knobs do not reach it.\n');
 
 process.exit(failed === 0 ? 0 : 1);

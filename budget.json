@@ -1,7 +1,7 @@
 {
-  "measuredAt": "2026-10-19T07:49:07.591Z",
+  "measuredAt": "2026-10-19T10:14:47.690Z",
   "dshVersion": "0.2.0-rc.2",
-  "sessionId": "session-0c0f8189-8912-4c66-82f8-7fe371615d75",
+  "sessionId": "session-0b695937-04be-4aa7-8950-0c3847568f1e",
   "preset": "lean",
   "cwd": "/tmp/lean-probe",
   "route": {
@@ -36,12 +36,14 @@
   "totalTokens": 322,
   "headers": 1,
   "policy": {
-    "thresholdRatio": 0.4,
-    "retainRatio": 0.05,
+    "thresholdRatio": 0.8,
+    "retainRatio": 0.16,
+    "headroomTokens": 65536,
+    "overridden": false,
     "spec": {
-      "thresholdTokens": 400000,
-      "retainTokens": 30800,
-      "binding": "ratio"
+      "thresholdTokens": 550464,
+      "retainTokens": 98560,
+      "binding": "headroom cap"
     }
   }
 }
