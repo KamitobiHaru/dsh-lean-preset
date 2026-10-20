@@ -1,13 +1,15 @@
 # dsh-lean-preset - GENERATED FILE, do not hand-edit.
 #
 # Adds one @deepseek-ai/dsh-agent-preset row per tool mask (lean):
-# the shipped `minimal` preset, verbatim, plus the shipped `standard` preset's
-# compaction group (whose `compaction-basic` row carries one `!!js` expression)
-# and filesystem row, plus the bundle's `tool-gate` plugin.
+# the shipped `minimal` preset with three declared changes -- the two
+# background-job description edits, the native filesystem mask, and the
+# shipped `standard` preset's compaction group (whose `compaction-basic` row
+# carries one `!!js` expression).
 #
-# `tool-gate` hides the tools that row registers together but this preset does
-# not want (read/write/edit), per agent, before its first
-# request. That is why only `read_image` reaches the model.
+# The filesystem row is mounted with the shipped `@deepseek-ai/dsh-tool-fs`
+# per-tool Config, so the tools this preset does not want (read/write/edit)
+# are never registered -- and a tool that is not registered also loses its own
+# prompt section. That is why only `read_image` reaches the model.
 #
 # The compaction expression reads HARNESS_LEAN_COMPACTION_THRESHOLD_RATIO and
 # HARNESS_LEAN_COMPACTION_RETAIN_RATIO at boot and returns only what they set: with neither set,
@@ -22,9 +24,9 @@
 #
 # source: @deepseek-ai/dsh-web-app/presets/minimal.patch.yml
 #         @deepseek-ai/dsh-web-app/presets/standard.patch.yml
-# dsh:    0.2.0-rc.2
-# sha256: 71ef887f43d8a37931ba3b014e5b116f79018af873d06625fb22e280a23c1dfc  (minimal)
-#         6cd2f197737fc94a45e487d0bb57869461dd6f392d45f6429b576e75d973eda8  (standard)
+# dsh:    0.2.1-rc.2
+# sha256: a2a9ba1c9c392a45466708f18bc0aefbf300577f9b544dc06049f73a8a5b3267  (minimal)
+#         0d398d2a6872a73a106cb3bd19303ecccf1637e1fcad4d0bf9d8a72d2c2c68f5  (standard)
 #
 # Regenerate with `node scripts/sync.mjs`; detect upstream drift with
 # `node scripts/check.mjs`; prove the result with `node scripts/verify.mjs`.
@@ -43,6 +45,56 @@
               prefix: You are a helpful software engineer assistant.
               complete: true
               includeRuntimeContext: false
+          - id: tool-fs
+            name: '@deepseek-ai/dsh-tool-fs'
+            config:
+              read: false
+              readImage: true
+              write: false
+              edit: false
+          - id: compaction
+            name: cordis:group
+            group: true
+            isolate:
+              compaction: true
+              toolResultPruner: true
+            config:
+              - id: compaction-basic
+                name: '@deepseek-ai/dsh-compaction-basic'
+                config: !!js |-
+                  (() => {
+                    const env = process.env;
+                    const read = (name) => {
+                      const raw = env[name];
+                      if (raw === undefined || raw.trim() === '') return undefined;
+                      const value = Number(raw);
+                      if (!Number.isFinite(value)) throw new Error('compaction ' + name + ' must be a number, got ' + raw);
+                      return value;
+                    };
+                    const thresholdRatio = read('HARNESS_LEAN_COMPACTION_THRESHOLD_RATIO');
+                    const retainRatio = read('HARNESS_LEAN_COMPACTION_RETAIN_RATIO');
+                    if (thresholdRatio !== undefined && !(thresholdRatio > 0 && thresholdRatio <= 1)) {
+                      throw new Error('compaction threshold ratio must be in (0, 1], got ' + thresholdRatio + '; set HARNESS_LEAN_COMPACTION_THRESHOLD_RATIO');
+                    }
+                    if (retainRatio !== undefined && !(retainRatio > 0)) {
+                      throw new Error('compaction retain ratio must be positive, got ' + retainRatio + '; set HARNESS_LEAN_COMPACTION_RETAIN_RATIO');
+                    }
+                    if (thresholdRatio !== undefined && retainRatio !== undefined && !(retainRatio < thresholdRatio)) {
+                      throw new Error('compaction retain ratio must be less than the threshold ratio ' + thresholdRatio + ', got ' + retainRatio);
+                    }
+                    const policy = {};
+                    if (thresholdRatio !== undefined) policy.thresholdRatio = thresholdRatio;
+                    if (retainRatio !== undefined) policy.retainRatio = retainRatio;
+                    return policy;
+                  })()
+              - id: command-compact
+                name: '@deepseek-ai/dsh-command-compact'
+              - id: tool-result-pruner
+                name: '@deepseek-ai/dsh-compaction-tool-result-pruner'
+                config:
+                  thresholdChars: 8192
+                  headChars: 4096
+                  tailChars: 1024
           - id: persistent-shell
             name: cordis:group
             group: true
@@ -88,57 +140,3 @@
                     * Use native Windows paths (C:\...) and $env:NAME variables; this is PowerShell, not bash.
                     * Please avoid commands that may produce a very large amount of output.
                     * For long lived commands use `Start-Process -NoNewWindow -RedirectStandardOutput <log> <cmd>` and poll that log; never leave a foreground command waiting.
-          - id: compaction
-            name: cordis:group
-            group: true
-            isolate:
-              compaction: true
-              toolResultPruner: true
-            config:
-              - id: compaction-basic
-                name: '@deepseek-ai/dsh-compaction-basic'
-                config: !!js |-
-                  (() => {
-                    const env = process.env;
-                    const read = (name) => {
-                      const raw = env[name];
-                      if (raw === undefined || raw.trim() === '') return undefined;
-                      const value = Number(raw);
-                      if (!Number.isFinite(value)) throw new Error('compaction ' + name + ' must be a number, got ' + raw);
-                      return value;
-                    };
-                    const thresholdRatio = read('HARNESS_LEAN_COMPACTION_THRESHOLD_RATIO');
-                    const retainRatio = read('HARNESS_LEAN_COMPACTION_RETAIN_RATIO');
-                    if (thresholdRatio !== undefined && !(thresholdRatio > 0 && thresholdRatio <= 1)) {
-                      throw new Error('compaction threshold ratio must be in (0, 1], got ' + thresholdRatio + '; set HARNESS_LEAN_COMPACTION_THRESHOLD_RATIO');
-                    }
-                    if (retainRatio !== undefined && !(retainRatio > 0)) {
-                      throw new Error('compaction retain ratio must be positive, got ' + retainRatio + '; set HARNESS_LEAN_COMPACTION_RETAIN_RATIO');
-                    }
-                    if (thresholdRatio !== undefined && retainRatio !== undefined && !(retainRatio < thresholdRatio)) {
-                      throw new Error('compaction retain ratio must be less than the threshold ratio ' + thresholdRatio + ', got ' + retainRatio);
-                    }
-                    const policy = {};
-                    if (thresholdRatio !== undefined) policy.thresholdRatio = thresholdRatio;
-                    if (retainRatio !== undefined) policy.retainRatio = retainRatio;
-                    return policy;
-                  })()
-              - id: command-compact
-                name: '@deepseek-ai/dsh-command-compact'
-              - id: tool-result-pruner
-                name: '@deepseek-ai/dsh-compaction-tool-result-pruner'
-                config:
-                  thresholdChars: 8192
-                  headChars: 4096
-                  tailChars: 1024
-          - id: tool-fs
-            name: '@deepseek-ai/dsh-tool-fs'
-          - id: tool-gate
-            name: dsh-lean-preset/gate/index.js
-            config:
-              preset: lean
-              deny:
-                - read
-                - write
-                - edit
-              scope: root

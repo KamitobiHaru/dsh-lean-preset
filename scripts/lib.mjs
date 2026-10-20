@@ -6,8 +6,9 @@
  * the way the Cordis Loader reads it -- `!!js` markers included.
  *
  * The generator never invents plugin rows. The preset is the shipped `minimal`
- * declaration plus rows copied verbatim from the shipped `standard`
- * declaration, so an upstream change to those rows is a diff, not a silent
+ * declaration with three declared changes -- two description edits, the native
+ * filesystem mask, and the compaction group copied from the shipped `standard`
+ * declaration -- so an upstream change to those rows is a diff, not a silent
  * divergence.
  */
 import { execFileSync } from 'node:child_process';
@@ -19,8 +20,6 @@ import { dirname, join, resolve } from 'node:path';
 
 /** Loader row id convention for an inserted preset declaration. */
 export const PRESET_ROW_PREFIX = 'preset-';
-/** This bundle's package name: the base for its own plugin specifier and for git installs. */
-export const PACKAGE_NAME = 'dsh-lean-preset';
 /** The shipped declaration this bundle derives from. */
 export const UPSTREAM_PRESET_ROW_ID = 'preset-minimal';
 export const UPSTREAM_PRESET_ID = 'minimal';
@@ -37,26 +36,53 @@ export const PRESET_ORDER = 5;
  * the same bundle, so the Web new-session picker is where a person chooses a
  * toolset; adding a toolset is one more entry here plus `sync.mjs`.
  *
- * `deny` is applied per agent by `gate/index.js` at `agent/created`, before the
- * session's first request. Only `@deepseek-ai/dsh-tool-fs` needs masking: it
- * registers read/write/edit/read_image as one row with no per-tool switch.
+ * `deny` names the filesystem tools this preset does not want. Since DSH
+ * 0.2.1 the shipped `@deepseek-ai/dsh-tool-fs` carries a per-tool Config
+ * (`read` / `readImage` / `write` / `edit`), so the list is translated into
+ * that native switch instead of hiding the tools after the fact: a masked tool
+ * is never registered, so it also loses its own prompt section. The shipped
+ * `minimal` preset masks the same way, and this bundle pins the mask here so
+ * it does not drift with upstream.
  */
 export const MASK_VARIANTS = [
   {
     key: 'lean',
     name: '轻量',
     description: '极简模式加上自动压缩与图像读取。',
-    deny: ['read', 'write', 'edit'],
-    scope: 'root'
+    deny: ['read', 'write', 'edit']
   }
 ];
+
+/**
+ * The shipped filesystem package's per-tool Config flags, keyed by tool name.
+ * The tool is `read_image`; its flag is `readImage`.
+ */
+export const FS_CONFIG_FLAGS = {
+  read: 'read',
+  read_image: 'readImage',
+  write: 'write',
+  edit: 'edit'
+};
+
+/**
+ * Turn one variant's deny list into the native `@deepseek-ai/dsh-tool-fs`
+ * Config: a denied tool is switched off, every other tool stays on.
+ * @param variant - one entry of {@link MASK_VARIANTS}.
+ * @returns the Config object the filesystem row is mounted with.
+ */
+export function fsConfigFor(variant) {
+  const denied = new Set(variant.deny);
+  return Object.fromEntries(
+    Object.entries(FS_CONFIG_FLAGS).map(([tool, flag]) => [flag, !denied.has(tool)])
+  );
+}
 
 /** Row id of one variant's declaration in the generated patch. */
 export function presetRowId(key) {
   return PRESET_ROW_PREFIX + key;
 }
 
-/** The copied filesystem row whose extra tools the gate hides. */
+/** The filesystem row whose tools this preset masks. */
 export const FS_ROW_ID = 'tool-fs';
 /** Package that owns read/write/edit/read_image; used by verification. */
 export const FS_PACKAGE = '@deepseek-ai/dsh-tool-fs';
@@ -66,17 +92,6 @@ export const KEPT_TOOL_NAME = 'read_image';
 export const COMPACTION_GROUP_ROW_ID = 'compaction';
 export const COMPACTION_ROW_ID = 'compaction-basic';
 export const PRUNER_ROW_ID = 'tool-result-pruner';
-/** The bundle-shipped gate plugin row. */
-export const GATE_ROW_ID = 'tool-gate';
-/**
- * Module specifier for the gate plugin. It is the bundle's own package name
- * plus a subpath rather than `./gate/index.js`: a preset declaration's rows are
- * resolved against the PROFILE's base URL, not the patch file's directory, so a
- * relative specifier there names a file beside `cordis.patch.yml` in the
- * profile (where nothing exists). The bundle is a profile dependency, so its
- * package name resolves from that base.
- */
-export const GATE_ROW_NAME = `${PACKAGE_NAME}/gate/index.js`;
 
 /**
  * Compaction knobs for the lean preset.
@@ -277,6 +292,14 @@ function applyDescriptionEdits(rows) {
  * The complete patch list this bundle ships. `sync.mjs` writes exactly this and
  * `verify.mjs` asserts the written file still equals it.
  *
+ * The declaration is the shipped `minimal` rows with three declared changes:
+ * the two background-job description edits, the native filesystem mask, and
+ * the compaction group. Nothing is appended to `minimal`: since DSH 0.2.1
+ * `minimal` already carries a `tool-fs` row and a `compaction` group, so
+ * appending copies of them would repeat their row ids and, worse, mount an
+ * unmasked filesystem row. The compaction group is REPLACED by the shipped
+ * `standard` group (which adds `tool-result-pruner`), not appended.
+ *
  * @param minimalEntries - parsed `presets/minimal.patch.yml`.
  * @param standardEntries - parsed `presets/standard.patch.yml`.
  */
@@ -290,24 +313,27 @@ export function buildPatchList(minimalEntries, standardEntries) {
     throw new Error(`${SOURCE_PRESET_ROW_ID} no longer declares preset id ${JSON.stringify(SOURCE_PRESET_ID)}`);
   }
 
-  const compactionGroup = findPlugin(standard.config.plugins, COMPACTION_GROUP_ROW_ID);
-  if (compactionGroup === undefined) throw new Error(`the shipped standard preset declares no ${COMPACTION_GROUP_ROW_ID} group`);
-  const fsRow = findPlugin(standard.config.plugins, FS_ROW_ID);
-  if (fsRow === undefined) throw new Error(`the shipped standard preset declares no ${FS_ROW_ID} row`);
+  const standardCompaction = findPlugin(standard.config.plugins, COMPACTION_GROUP_ROW_ID);
+  if (standardCompaction === undefined) throw new Error(`the shipped standard preset declares no ${COMPACTION_GROUP_ROW_ID} group`);
 
   const insert = MASK_VARIANTS.map((variant) => {
     const plugins = minimalPluginsWithEdits(minimalEntries);
-    const compaction = clone(compactionGroup);
+
+    // 1. The filesystem row: mask the denied tools with the native switch.
+    const fsRow = findPlugin(plugins, FS_ROW_ID);
+    if (fsRow === undefined) throw new Error(`the shipped minimal preset declares no ${FS_ROW_ID} row`);
+    fsRow.config = fsConfigFor(variant);
+
+    // 2. The compaction group: replace minimal's with the standard one, which
+    //    adds the tool-result pruner, and inject the environment policy.
+    const minimalCompaction = findPlugin(plugins, COMPACTION_GROUP_ROW_ID);
+    if (minimalCompaction === undefined) throw new Error(`the shipped minimal preset declares no ${COMPACTION_GROUP_ROW_ID} group`);
+    const compaction = clone(standardCompaction);
     const basic = findPlugin(compaction.config, COMPACTION_ROW_ID);
     if (basic === undefined) throw new Error(`the copied ${COMPACTION_GROUP_ROW_ID} group declares no ${COMPACTION_ROW_ID} row`);
     basic.config = { __jsExpr: EXPRESSION };
-    plugins.push(compaction);
-    plugins.push(clone(fsRow));
-    plugins.push({
-      id: GATE_ROW_ID,
-      name: GATE_ROW_NAME,
-      config: { preset: variant.key, deny: [...variant.deny], scope: variant.scope }
-    });
+    plugins[plugins.indexOf(minimalCompaction)] = compaction;
+
     return {
       id: presetRowId(variant.key),
       name: PRESET_PLUGIN_NAME,
@@ -360,6 +386,22 @@ export function packageToolNames(installDir, packageName) {
   const names = new Set();
   for (const match of source.matchAll(/defineTool\(\{\s*name: "([A-Za-z0-9_]+)"/gu)) names.add(match[1]);
   return [...names];
+}
+
+/**
+ * Validate a filesystem mask against the INSTALLED `@deepseek-ai/dsh-tool-fs`
+ * Config schema, so the assertion is about the shipped package's real flags
+ * rather than about a string this bundle happens to write.
+ * @param installDir - the dsh installation the preset is generated for.
+ * @param config - the mask to validate.
+ * @returns the Config the shipped package resolves it to.
+ */
+export function installedFsConfig(installDir, config) {
+  const require = createRequire(join(installDir, 'package.json'));
+  const file = require.resolve(`${FS_PACKAGE}/package.json`);
+  const pkg = require(FS_PACKAGE);
+  if (typeof pkg.Config !== 'function') throw new Error(`${FS_PACKAGE} exports no Config schema`);
+  return { resolved: pkg.Config(config), source: file };
 }
 
 /**

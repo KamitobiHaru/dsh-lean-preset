@@ -2,10 +2,10 @@
 /**
  * Regenerate `cordis.patch.yml` from the installed DSH's shipped presets.
  *
- * The declaration is the shipped `minimal` preset, verbatim, plus two copied
- * rows from the shipped `standard` preset (the compaction group and the
- * filesystem suite) and one bundle-local gate row. Nothing is hand-written
- * except the gate's `deny` list and the compaction expression.
+ * The declaration is the shipped `minimal` preset with three declared changes:
+ * the two background-job description edits, the native filesystem mask, and the
+ * compaction group copied from the shipped `standard` preset. Nothing is
+ * hand-written except the mask and the compaction expression.
  *
  * Usage: node scripts/sync.mjs [--install <dsh package dir>]
  *                             [--minimal <minimal.patch.yml>] [--standard <standard.patch.yml>]
@@ -34,13 +34,15 @@ const header = [
   '# dsh-lean-preset - GENERATED FILE, do not hand-edit.',
   '#',
   '# Adds one @deepseek-ai/dsh-agent-preset row per tool mask (' + variants + '):',
-  '# the shipped `minimal` preset, verbatim, plus the shipped `standard` preset\'s',
-  '# compaction group (whose `' + L.COMPACTION_ROW_ID + '` row carries one `!!js` expression)',
-  '# and filesystem row, plus the bundle\'s `' + L.GATE_ROW_ID + '` plugin.',
+  '# the shipped `minimal` preset with three declared changes -- the two',
+  '# background-job description edits, the native filesystem mask, and the',
+  '# shipped `standard` preset\'s compaction group (whose `' + L.COMPACTION_ROW_ID + '` row',
+  '# carries one `!!js` expression).',
   '#',
-  '# `' + L.GATE_ROW_ID + '` hides the tools that row registers together but this preset does',
-  '# not want (' + L.MASK_VARIANTS.map((variant) => variant.deny.join('/')).join('; ') + '), per agent, before its first',
-  '# request. That is why only `' + L.KEPT_TOOL_NAME + '` reaches the model.',
+  '# The filesystem row is mounted with the shipped `@deepseek-ai/dsh-tool-fs`',
+  '# per-tool Config, so the tools this preset does not want (' + L.MASK_VARIANTS.map((variant) => variant.deny.join('/')).join('; ') + ')',
+  '# are never registered -- and a tool that is not registered also loses its own',
+  '# prompt section. That is why only `' + L.KEPT_TOOL_NAME + '` reaches the model.',
   '#',
   '# The compaction expression reads ' + L.THRESHOLD_ENV + ' and',
   '# ' + L.RETAIN_ENV + ' at boot and returns only what they set: with neither set,',

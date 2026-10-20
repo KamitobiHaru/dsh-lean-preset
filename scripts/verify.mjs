@@ -4,14 +4,15 @@
  *
  *   1. `cordis.patch.yml` is exactly the generator's output for the installed
  *      shipped presets;
- *   2. the preset is the shipped `minimal` declaration plus the shipped
- *      `standard` compaction and filesystem rows plus one gate row -- nothing
- *      else, and no other row drifted;
+ *   2. the preset is the shipped `minimal` declaration with exactly three
+ *      declared changes -- the two description edits, the native filesystem
+ *      mask, and the compaction group -- and nothing else, and no other row
+ *      drifted;
  *   3. DSH's own dump/parse dialect round-trips the `!!js` markers;
  *   4. the injected compaction expression yields the documented policy table
  *      and refuses invalid values;
- *   5. `gate/index.js` loads under plain node and gates exactly the agents it
- *      promises to.
+ *   5. the filesystem mask is a real `@deepseek-ai/dsh-tool-fs` Config, so the
+ *      masked tools are never registered.
  *
  * Finally it prints the effective compaction numbers for this profile's models.
  *
@@ -21,7 +22,6 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { pathToFileURL } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
 import * as L from './lib.mjs';
 
@@ -92,9 +92,20 @@ function allRows(rows, found = []) {
 
 const standardPreset = L.findInsertedRow(standard, L.SOURCE_PRESET_ROW_ID);
 const compactionGroup = L.findPlugin(standardPreset.config.plugins, L.COMPACTION_GROUP_ROW_ID);
-const fsRow = L.findPlugin(standardPreset.config.plugins, L.FS_ROW_ID);
 const expectedMinimal = L.minimalPluginsWithEdits(minimal);
 const presetRows = L.insertedRows(written);
+
+/** The mask variant one inserted preset row declares. */
+function variantOf(row) {
+  const variant = L.MASK_VARIANTS.find((candidate) => L.presetRowId(candidate.key) === row.id);
+  assert(variant !== undefined, `no mask variant declares the row id ${JSON.stringify(row.id)}`);
+  return variant;
+}
+
+/** The tool a native filesystem Config flag switches. */
+const TOOL_OF_FLAG = Object.fromEntries(
+  Object.entries(L.FS_CONFIG_FLAGS).map(([tool, flag]) => [flag, tool])
+);
 
 check('cordis.patch.yml is exactly the generator output', () => {
   same(written, expected, 'the written patch differs from buildPatchList(); run `node scripts/sync.mjs`');
@@ -132,20 +143,32 @@ check('plugin row ids are unique inside each preset', () => {
   }
 });
 
-check('leading rows are the shipped minimal preset plus only the declared description edits', () => {
+check('the preset is the shipped minimal preset plus only the declared changes', () => {
   for (const row of presetRows) {
     const plugins = row.config.plugins;
-    same(plugins.slice(0, expectedMinimal.length), expectedMinimal, `${row.id} drifted from the shipped minimal preset`);
-    assert(plugins.length === expectedMinimal.length + 3, `${row.id} carries ${plugins.length} rows, expected ${expectedMinimal.length + 3}`);
-  }
-});
-
-check('the added rows are exactly the compaction group, the tool-fs row and the gate row', () => {
-  for (const row of presetRows) {
-    const plugins = row.config.plugins;
-    same(plugins.at(-2), fsRow, `${row.id}: the tool-fs row is not the shipped standard row`);
-    assert(plugins.at(-1).id === L.GATE_ROW_ID, `${row.id}: the last row is ${plugins.at(-1).id}`);
-    assert(plugins.at(-3).id === L.COMPACTION_GROUP_ROW_ID, `${row.id}: the compaction group is not where it is expected`);
+    assert(
+      plugins.length === expectedMinimal.length,
+      `${row.id} carries ${plugins.length} rows, expected the shipped minimal's ${expectedMinimal.length}: nothing may be appended to it`
+    );
+    for (const [index, expected] of expectedMinimal.entries()) {
+      const actual = plugins[index];
+      assert(actual.id === expected.id, `${row.id} row ${index} is ${actual.id}, expected ${expected.id}`);
+      if (expected.id === L.FS_ROW_ID) {
+        // The filesystem row: only its config differs -- the native mask.
+        const want = { ...expected, config: L.fsConfigFor(variantOf(row)) };
+        same(actual, want, `${row.id}: the ${L.FS_ROW_ID} row drifted beyond the declared mask`);
+        continue;
+      }
+      if (expected.id === L.COMPACTION_GROUP_ROW_ID) {
+        // The compaction group: replaced by the shipped standard group, with
+        // only the policy expression injected.
+        const want = structuredClone(compactionGroup);
+        L.findPlugin(want.config, L.COMPACTION_ROW_ID).config = { __jsExpr: L.EXPRESSION };
+        same(actual, want, `${row.id}: the ${L.COMPACTION_GROUP_ROW_ID} group drifted from the shipped standard group`);
+        continue;
+      }
+      same(actual, expected, `${row.id}: the ${expected.id} row drifted from the shipped minimal preset`);
+    }
   }
 });
 
@@ -154,6 +177,26 @@ check('the compaction group is the shipped standard group with only the policy e
   L.findPlugin(want.config, L.COMPACTION_ROW_ID).config = { __jsExpr: L.EXPRESSION };
   for (const row of presetRows) {
     same(L.findPlugin(row.config.plugins, L.COMPACTION_GROUP_ROW_ID), want, `${row.id}: the compaction group drifted from the shipped standard group`);
+  }
+});
+
+check('the filesystem mask is a real tool-fs Config that switches the denied tools off', () => {
+  for (const row of presetRows) {
+    const variant = variantOf(row);
+    const { resolved, source } = L.installedFsConfig(installDir, L.fsConfigFor(variant));
+    for (const [flag, value] of Object.entries(resolved)) {
+      const tool = TOOL_OF_FLAG[flag];
+      if (tool === undefined) continue;
+      const denied = variant.deny.includes(tool);
+      assert(
+        value === !denied,
+        `${row.id}: ${source} resolves ${flag} to ${value}, but ${tool} is ${denied ? 'denied' : 'kept'}`
+      );
+    }
+    assert(resolved.read === false, `${row.id}: read must be switched off`);
+    assert(resolved.readImage === true, `${row.id}: read_image must stay on -- it is the tool this preset exists for`);
+    assert(resolved.write === false, `${row.id}: write must be switched off`);
+    assert(resolved.edit === false, `${row.id}: edit must be switched off`);
   }
 });
 
@@ -205,18 +248,16 @@ check('the preset defers to the installed compaction defaults', () => {
   );
 });
 
-check('the gate row names the bundle plugin and uses the variant mask', () => {
-  const manifest = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
-  for (const variant of L.MASK_VARIANTS) {
-    const row = presetRows.find((candidate) => candidate.id === L.presetRowId(variant.key));
-    const gate = L.findPlugin(row.config.plugins, L.GATE_ROW_ID);
-    assert(gate.name === L.GATE_ROW_NAME, `${row.id}: gate mounts ${JSON.stringify(gate.name)}`);
-    assert(gate.name.startsWith(`${manifest.name}/`), `the gate specifier must be rooted at the bundle package ${manifest.name}`);
-    assert(existsSync(join(root, gate.name.slice(manifest.name.length + 1))), `${gate.name} does not exist inside the bundle`);
-    assert(gate.config.preset === variant.key, `${row.id}: gate is bound to preset ${JSON.stringify(gate.config.preset)}`);
-    same(gate.config.deny, variant.deny, `${row.id}: gate deny list drifted`);
-    assert(gate.config.scope === variant.scope, `${row.id}: gate scope is ${JSON.stringify(gate.config.scope)}`);
+check('the preset ships no bundle-local plugin: the mask is the shipped native switch', () => {
+  for (const row of presetRows) {
+    for (const plugin of allRows(row.config.plugins)) {
+      assert(
+        !plugin.name.startsWith('dsh-lean-preset/'),
+        `${row.id} mounts the bundle-local ${plugin.name}; the mask is the shipped tool-fs Config`
+      );
+    }
   }
+  assert(!writtenText.includes('dsh-lean-preset/'), 'the generated file still names a bundle-local plugin');
 });
 
 check('the generated file carries exactly the expected !!js tags', () => {
@@ -252,21 +293,11 @@ check('the persona keeps minimal behaviour (complete prompt, no runtime context)
   }
 });
 
-check('every mounted package resolves: shipped ones in dsh, this bundle beside the profile', () => {
-  const manifest = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
+check('every mounted package resolves in the installed DSH', () => {
   for (const row of presetRows) {
     for (const plugin of allRows(row.config.plugins)) {
       const name = plugin.name;
       if (name.startsWith('cordis:') || name.startsWith('.')) continue;
-      if (name === manifest.name || name.startsWith(`${manifest.name}/`)) {
-        const subpath = name === manifest.name ? '.' : `./${name.slice(manifest.name.length + 1)}`;
-        const relative = subpath === '.' ? 'index.js' : subpath.slice(2);
-        assert(existsSync(join(root, relative)), `${name} names no file inside the bundle (${relative})`);
-        if (manifest.exports !== undefined) {
-          assert(manifest.exports[subpath] !== undefined, `package.json exports does not expose ${subpath}`);
-        }
-        continue;
-      }
       tools.require.resolve(`${name}/package.json`);
     }
   }
@@ -279,133 +310,7 @@ check('upstream.json stamps the installed presets and version', () => {
   assert(stamp.sources.standard.sha256 === L.sha256(readFileSync(standardSource, 'utf8')), 'the standard preset changed since this file was generated');
 });
 
-let gateModule;
-let gateError;
-try {
-  gateModule = await import(pathToFileURL(join(root, 'gate', 'index.js')).href);
-} catch (error) {
-  gateError = error.message;
-}
-
-check('gate/index.js loads under plain node and exports the plugin contract', () => {
-  assert(gateModule !== undefined, `gate/index.js failed to import: ${gateError}`);
-  assert(gateModule.name === L.GATE_ROW_ID, `gate name is ${JSON.stringify(gateModule.name)}`);
-  assert(Array.isArray(gateModule.inject) && gateModule.inject.includes('tools'), 'gate does not declare the tools injection');
-  assert(typeof gateModule.apply === 'function', 'gate exports no apply');
-});
-
-/** A context/agent pair that records what the gate registers, without DSH. */
-function harness(presets = { s1: 'lean', s2: 'lean', s3: 'lean', s4: 'standard' }) {
-  const listeners = new Map();
-  const state = { restrictions: [], lifted: 0, gates: [] };
-  const ctx = {
-    on(event, fn) {
-      if (!listeners.has(event)) listeners.set(event, []);
-      listeners.get(event).push(fn);
-      return () => {};
-    },
-    agentPresets: {
-      composedPreset: (agentCtx) => agentCtx.preset
-    }
-  };
-  const agent = (depth, id, preset = presets[id] ?? 'lean') => ({
-    session: { id, header: { delegationDepth: depth } },
-    ctx: {
-      preset,
-      effect: (body) => body(),
-      tools: {
-        restrict: (filter) => {
-          state.restrictions.push(filter);
-          return () => {
-            state.lifted += 1;
-          };
-        }
-      }
-    }
-  });
-  return {
-    state,
-    ctx,
-    fire: (event, payload) => {
-      for (const fn of listeners.get(event) ?? []) fn(payload, () => Promise.resolve({}));
-    },
-    agent,
-    next: () => Promise.resolve({})
-  };
-}
-
-check('the gate restricts a root agent with the configured mask', () => {
-  const h = harness();
-  gateModule.apply(h.ctx, { preset: 'lean', deny: ['read', 'write', 'edit'], scope: 'root' });
-  h.fire('agent/created', { agent: h.agent(0, 's1') });
-  assert(h.state.restrictions.length === 1, `expected one restriction, found ${h.state.restrictions.length}`);
-  same(h.state.restrictions[0].deny, ['read', 'write', 'edit'], 'the deny list did not reach restrict()');
-  assert(h.state.restrictions[0].allow === undefined, 'a deny-only gate must not set allow');
-});
-
-check('the pre-step hook gates an agent created before the preset was mounted', () => {
-  const h = harness();
-  gateModule.apply(h.ctx, { preset: 'lean', deny: ['read'], scope: 'root' });
-  // No agent/created for this agent: it existed before the preset was mounted.
-  const agent = h.agent(0, 's2');
-  h.fire('agent/pre-step', { agent });
-  assert(h.state.restrictions.length === 1, 'the pre-step hook did not gate the agent');
-  h.fire('agent/pre-step', { agent });
-  assert(h.state.restrictions.length === 1, 'the pre-step hook must be idempotent');
-});
-
-check('the inbox-claim hook gates before a step is assembled', () => {
-  const h = harness();
-  gateModule.apply(h.ctx, { preset: 'lean', deny: ['read'], scope: 'root' });
-  h.fire('agent/inbox/claimed', { agent: h.agent(0, 's3') });
-  assert(h.state.restrictions.length === 1, 'the inbox-claim hook did not gate the agent');
-});
-
-check('the gate leaves agents of another preset alone', () => {
-  const h = harness();
-  gateModule.apply(h.ctx, { preset: 'lean', deny: ['read'], scope: 'root' });
-  h.fire('agent/pre-step', { agent: h.agent(0, 's4') });
-  h.fire('agent/created', { agent: h.agent(0, 's4') });
-  assert(h.state.restrictions.length === 0, 'the gate touched an agent bound to another preset');
-});
-
-check('scope root spares delegated children; scope all gates them', () => {
-  const root = harness();
-  gateModule.apply(root.ctx, { preset: 'lean', deny: ['read'], scope: 'root' });
-  root.fire('agent/created', { agent: root.agent(1, 's1') });
-  assert(root.state.restrictions.length === 0, 'scope root must not gate a delegated child');
-
-  const all = harness();
-  gateModule.apply(all.ctx, { preset: 'lean', deny: ['read'], scope: 'all' });
-  all.fire('agent/created', { agent: all.agent(1, 's1') });
-  assert(all.state.restrictions.length === 1, 'scope all must gate a delegated child');
-});
-
-check('the gate lifts its restriction on disposal and on unload', () => {
-  const h = harness();
-  const dispose = gateModule.apply(h.ctx, { preset: 'lean', deny: ['read'], scope: 'root' });
-  h.fire('agent/created', { agent: h.agent(0, 's1') });
-  h.fire('agent/disposed', { agent: h.agent(0, 's1') });
-  assert(h.state.lifted === 1, `disposal lifted ${h.state.lifted} restrictions, expected 1`);
-  h.fire('agent/created', { agent: h.agent(0, 's2') });
-  dispose();
-  assert(h.state.lifted === 2, `unload lifted ${h.state.lifted} restrictions, expected 2`);
-});
-
-check('the gate refuses a configuration that hides nothing or names no preset', () => {
-  const base = { preset: 'lean', scope: 'root' };
-  for (const config of [undefined, {}, { ...base, deny: [] }, { ...base, deny: [''] }, { ...base, deny: ['read'], allow: [] }, { deny: ['read'] }, { ...base, preset: '' }, { ...base, deny: ['read'], scope: 'children' }]) {
-    let threw = false;
-    try {
-      gateModule.apply(harness().ctx, config);
-    } catch {
-      threw = true;
-    }
-    assert(threw, `${JSON.stringify(config)} was accepted but should be rejected`);
-  }
-});
-
-check('the gate mask names real tools of the shipped filesystem package', () => {
+check('the mask names real tools of the shipped filesystem package', () => {
   const names = L.packageToolNames(installDir, L.FS_PACKAGE);
   assert(names.includes(L.KEPT_TOOL_NAME), `${L.FS_PACKAGE} no longer registers ${L.KEPT_TOOL_NAME}: the preset would expose nothing`);
   for (const variant of L.MASK_VARIANTS) {
@@ -413,6 +318,9 @@ check('the gate mask names real tools of the shipped filesystem package', () => 
       assert(names.includes(name), `${L.FS_PACKAGE} registers no ${JSON.stringify(name)}; a deny list with an unknown name fails at the first session`);
     }
     assert(!variant.deny.includes(L.KEPT_TOOL_NAME), `${variant.key} denies the tool it exists to expose`);
+    for (const name of variant.deny) {
+      assert(name in L.FS_CONFIG_FLAGS, `the shipped ${L.FS_PACKAGE} has no per-tool flag for ${JSON.stringify(name)}`);
+    }
   }
 });
 

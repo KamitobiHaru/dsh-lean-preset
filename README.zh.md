@@ -2,7 +2,25 @@
 
 [English](README.md) | 中文
 
-给 DSH 加一个**极简**预设：把官方 `minimal` 模式原样留下，只补两件它缺的核心能力 —— **自动压缩** 与 **读图**。
+## 已废弃
+
+**本项目已废弃，停止维护。** DSH 0.2.1 的官方 `minimal` 预设已经自带了这个包当初要补的两项能力：
+
+- **读图** —— 官方 `minimal` 现在挂载 `@deepseek-ai/dsh-tool-fs` 时带 `read: false, readImage: true, write: false, edit: false`，`read_image` 开箱可用。上游同时长出了**原生的逐工具开关**，也就是这个包原来用自带的 `tool-gate` 插件模拟的东西。
+- **自动压缩** —— 官方 `minimal` 现在自带 `compaction` 组（`compaction-basic` + `/compact` 命令）。
+
+两件事都成了上游的事，本包就没有可贡献的了，不再发版。
+
+**改用什么：**
+
+- 官方 `minimal` 预设 —— 同样的两个工具，用系统自己的压缩默认值。
+- [`dsh-compaction-tune`](https://github.com/KamitobiHaru/dsh-compaction-tune) 的 **「高性能精简」**（`high-performance-minimal`）预设 —— 同样的极简工具面，但压缩策略可以用环境变量调。
+
+本文其余部分描述的是最后一个可用版本（`v0.2.1`），保留作参考。
+
+## 它曾经是什么
+
+给 DSH 加一个**极简**预设：把官方 `minimal` 模式原样留下，只补两件它当时缺的核心能力 —— **自动压缩** 与 **读图**。
 
 - 模型看到的工具只有两个：`bash`（官方 minimal 的常驻 shell）和 `read_image`。
 - 系统提示词只有一句话（minimal 原本的样子）。
@@ -47,13 +65,13 @@ dsh plugin --profile web add github:KamitobiHaru/dsh-lean-preset#v0.2.1
 - **`/compact`** 手动压缩，`tool-result-pruner` 在压缩前先裁剪超大工具输出。
 - **`read_image`**：PNG/JPEG/WebP/GIF，自动降采样。
 - **后台长任务**：用常驻 shell 的 `nohup ... &` + `tail/grep` 轮询（见下），不需要额外工具。
-- **与「高性能」（`dsh-compaction-tune`）并存**：本包不碰 `agent-preset-registry`，也不读它的 `HARNESS_COMPACTION_*` 变量，两个预设各调各的。
+- **与「高性能」「高性能精简」（`dsh-compaction-tune`）并存**：本包不碰 `agent-preset-registry`，也不读它的 `HARNESS_COMPACTION_*` 变量，各预设各调各的。
 
 ## 工作原理
 
-预设 = 官方 `minimal` 声明 + 两块从官方 `standard` 声明**原样复制**的行 + 一个本包自带的小插件：
+预设 = 官方 `minimal` 声明 + 两块从官方 `standard` 声明**原样复制**的行：
 
-- 文件系统行只能整行挂载，因为 `read_image` 与 `read`/`write`/`edit` 同属 `@deepseek-ai/dsh-tool-fs`，它没有「只挂 read_image」的开关；再由 `tool-gate` 在**每个 agent 自己的 context** 上隐藏另外三个。被隐藏的工具连它自己的提示词段一起消失，所以模型那里只剩 `bash` 和 `read_image`。
+- 文件系统行由**上游自带**的 `@deepseek-ai/dsh-tool-fs` 逐工具开关遮蔽：`read: false, readImage: true, write: false, edit: false`。关掉的工具根本不会注册，所以模型那里只剩 `bash` 和 `read_image`。（DSH 0.2.1 之前这一行没有这种开关，本包得自带 `tool-gate` 插件按 agent 隐藏多余的工具；上游的原生开关取代了它。）
 - 压缩组照抄 `standard`，只把 `compaction-basic` 的 config 换成读两个环境变量的表达式：都没设时它返回空对象，于是每个字段都落到 harness 默认值。
 - 与上游逐行一致由 `scripts/verify.mjs` 保证（`minimal` 必须除声明的改动外与安装目录里的 `presets/minimal.patch.yml` 深相等）。
 
@@ -144,15 +162,13 @@ dsh plugin --profile web remove dsh-lean-preset
 
 ## 已知限制
 
-- **只有两个工具**。`read`/`write`/`edit` 只是被隐藏（插件仍挂载），把 `scripts/lib.mjs` 隐藏名单里的名字删掉再重新生成即可要回，见 [MAINTAINING.md](MAINTAINING.md)。
+- **只有两个工具**。`read`/`write`/`edit` 由上游 `tool-fs` 的开关直接关掉（不再挂载），把 `scripts/lib.mjs` 里的开关改回来再重新生成即可要回，见 [MAINTAINING.md](MAINTAINING.md)。
 - **`complete: true` 的取舍继承自 minimal**：identity 段、`@路径` 规则、Web 文件链接规范、Web surface 说明、harness source 说明都不出现在提示词里（合计约 666 tok）。这是「一句话提示词」的代价；要保留就把它改成 `complete: false`。
 - **压缩策略的粒度是「整个预设」**：一个预设只能有一套策略（该预设的每个会话都用它），不能按会话切换。要两套策略就出两个预设。
 - **环境变量在启动时读取**：改完 `~/.dsh/.env` 必须重启 `dsh web`；正在跑的会话不受影响。
 - **没有后台任务工具 / 子 Agent / 联网检索**（这是刻意的）：后台用 `nohup` + 轮询；子 Agent 与联网各要多约 900 / 230 tok 的 schema 与说明，而且都会让工具目录变「吵」。
 - **`read_image` 需要当前模型路由声明图像输入**。切到未声明的模型时它会明确报错 `model "..." does not declare image input`。
-- **`tool-gate` 的时序**：常规建会话路径上限制在第一次请求前就位；如果是「先建空白会话、再挑预设」，由 `agent/inbox/claimed` 在组装前补上，`agent/pre-step` 兜底 —— 兜底那次只能纠正下一个请求。
 - **名字不参与翻译**：「轻量」这个名字和描述在任何界面语言下都是中文 —— DSH 只翻译它自带的 standard / minimal / creator，自定义预设的 `name` / `description` 逐字显示。英文界面里请认这张中文卡片。
-- **子 Agent 不在 gate 范围内**（`scope: root`）。本预设没有子 Agent，所以不影响；如果以后加了，`scope: all` 可以一起隐藏。
 - 请求开销按 DSH 的 4 字符/token 估算，CJK 会低估；数字用于横向比较，不是账单。
 
 ## License

@@ -2,7 +2,25 @@
 
 English | [中文](README.zh.md)
 
-Adds a **lean** agent preset to DSH: the shipped `minimal` preset kept verbatim, plus the two core capabilities it lacks — **automatic compaction** and **image input**.
+## Deprecated
+
+**This project is deprecated and no longer maintained.** DSH 0.2.1's shipped `minimal` preset now provides both capabilities this bundle existed to add:
+
+- **Image input** — the official `minimal` mounts `@deepseek-ai/dsh-tool-fs` with `read: false, readImage: true, write: false, edit: false`, so `read_image` is available out of the box. Upstream also grew a **native per-tool switch**, which is what this bundle used to emulate with its own `tool-gate` plugin.
+- **Automatic compaction** — the official `minimal` ships a `compaction` group (`compaction-basic` + the `/compact` command).
+
+Both are now upstream's job, so there is nothing left for this bundle to contribute. No further releases will be made.
+
+**What to use instead:**
+
+- The official `minimal` preset, for the same two-tool surface with the harness's own compaction defaults.
+- [`dsh-compaction-tune`](https://github.com/KamitobiHaru/dsh-compaction-tune)'s **「高性能精简」** (`high-performance-minimal`) preset, if you want the same minimal tool surface *plus* a compaction policy you can tune through environment variables.
+
+The rest of this document describes the last working release (`v0.2.1`) and is kept for reference.
+
+## What it was
+
+Adds a **lean** agent preset to DSH: the shipped `minimal` preset kept verbatim, plus the two core capabilities it lacked at the time — **automatic compaction** and **image input**.
 
 - The model sees exactly two tools: `bash` (minimal's persistent shell) and `read_image`.
 - The system prompt is one sentence (minimal's own).
@@ -49,13 +67,13 @@ To make it the default on one machine, add these four lines to `$DSH_HOME/profil
 - **`/compact`** for manual compaction, with `tool-result-pruner` trimming oversized tool output before it.
 - **`read_image`**: PNG/JPEG/WebP/GIF, downsampled automatically.
 - **Long background jobs**: `nohup … &` in the persistent shell plus `tail`/`grep` polling (see below), without a dedicated tool.
-- **Coexists with `dsh-compaction-tune`** (the "高性能" preset): this bundle never touches `agent-preset-registry` and never reads that bundle's `HARNESS_COMPACTION_*` variables.
+- **Coexists with `dsh-compaction-tune`** (the "高性能" and "高性能精简" presets): this bundle never touches `agent-preset-registry` and never reads that bundle's `HARNESS_COMPACTION_*` variables.
 
 ## How it works
 
-The preset is the shipped `minimal` declaration, two rows copied verbatim from the shipped `standard` declaration, and one small plugin from this bundle:
+The preset is the shipped `minimal` declaration plus two rows copied verbatim from the shipped `standard` declaration:
 
-- The filesystem row has to be mounted whole, because `read_image` and `read`/`write`/`edit` all belong to `@deepseek-ai/dsh-tool-fs`, which offers no "mount only `read_image`" switch. A `tool-gate` plugin then hides the other three **on each agent's own context**. Hidden tools take their prompt sections with them, so the model is left with `bash` and `read_image`.
+- The filesystem row is masked by the **shipped** `@deepseek-ai/dsh-tool-fs` per-tool switch: `read: false, readImage: true, write: false, edit: false`. The tools that are switched off are never registered, so the model is left with `bash` and `read_image`. (Before DSH 0.2.1 this row had no such switch, and the bundle carried its own `tool-gate` plugin to hide the unwanted tools per agent; upstream's native switch replaced it.)
 - The compaction group is copied from `standard`; only `compaction-basic`'s config is replaced with an expression that reads two environment variables. With neither set it returns an empty object, so every field falls through to the harness default.
 - `scripts/verify.mjs` enforces the verbatim match: apart from the declared edits, `minimal` must be deep-equal to the installed `presets/minimal.patch.yml`.
 
@@ -146,15 +164,13 @@ Then delete the `agent-preset-registry` override you added in `~/.dsh/profiles/<
 
 ## Known limits
 
-- **Two tools only.** `read`/`write`/`edit` are hidden, not unmounted; delete them from the deny list in `scripts/lib.mjs` and re-run the generator to get them back — see [MAINTAINING.md](MAINTAINING.md).
+- **Two tools only.** `read`/`write`/`edit` are switched off by the shipped `tool-fs` config; flip the flags in `scripts/lib.mjs` and re-run the generator to get them back — see [MAINTAINING.md](MAINTAINING.md).
 - **`complete: true` is inherited from minimal**: the identity section, `@path` rules, Web file-link conventions, the Web surface description and the harness-source note are all absent from the prompt (≈666 tok combined). That is the price of the one-sentence prompt; set `complete: false` to keep them.
 - **Compaction policy is per preset**: one preset has one policy, shared by all of its sessions; it cannot switch per session. Two policies means two presets.
 - **Environment variables are read at startup**: restart `dsh web` after editing `~/.dsh/.env`; running sessions are unaffected.
 - **No background-job tool, no subagents, no web search** (deliberate): background work uses `nohup` + polling; subagents and web search would each add roughly 900 / 230 tok of schema and guidance, and both make the tool catalog noisier.
 - **`read_image` needs the current route to declare image input**. On a model that does not, it fails with `model "..." does not declare image input`.
-- **`tool-gate` timing**: on the normal path the restriction is in place before the first request; when a preset is attached to an existing blank session, `agent/inbox/claimed` adds it before assembly, with `agent/pre-step` as the safety net — that net can only correct the next request.
 - **The name is not translated**: 「轻量」 and its description stay Chinese in every UI language, because DSH translates only its own shipped presets and shows a custom preset's `name`/`description` verbatim. Look for that Chinese card in an English UI.
-- **Subagents are outside the gate** (`scope: root`). This preset has none, so it does not matter; if you add one, `scope: all` hides the tools there too.
 - Request overhead uses DSH's 4-character/token estimate, which underestimates CJK; the numbers are for comparison, not billing.
 
 ## License

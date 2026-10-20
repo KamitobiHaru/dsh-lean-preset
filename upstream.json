@@ -1,14 +1,14 @@
 {
-  "dshVersion": "0.2.0-rc.2",
+  "dshVersion": "0.2.1-rc.2",
   "sources": {
     "minimal": {
-      "path": "/data3/zsy/node-v24.18.0-linux-x64/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-web-app/presets/minimal.patch.yml",
-      "sha256": "71ef887f43d8a37931ba3b014e5b116f79018af873d06625fb22e280a23c1dfc"
+      "path": "/root/.node-v24.18.1-linux-arm64/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-web-app/presets/minimal.patch.yml",
+      "sha256": "a2a9ba1c9c392a45466708f18bc0aefbf300577f9b544dc06049f73a8a5b3267"
     },
     "standard": {
-      "path": "/data3/zsy/node-v24.18.0-linux-x64/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-web-app/presets/standard.patch.yml",
-      "sha256": "6cd2f197737fc94a45e487d0bb57869461dd6f392d45f6429b576e75d973eda8"
+      "path": "/root/.node-v24.18.1-linux-arm64/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-web-app/presets/standard.patch.yml",
+      "sha256": "0d398d2a6872a73a106cb3bd19303ecccf1637e1fcad4d0bf9d8a72d2c2c68f5"
     }
   },
-  "generatedAt": "2026-10-19T10:05:36.045Z"
+  "generatedAt": "2026-10-20T06:16:31.700Z"
 }
