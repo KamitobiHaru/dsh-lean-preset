@@ -1,9 +1,8 @@
 # 维护说明（维护者向）
 
 > **本仓库已废弃，停止维护。** DSH 0.2.1 的官方 `minimal` 预设已自带 `read_image` 与自动压缩，
-> 本包当初存在的两个理由都不成立了，因此不再发版。下文描述的是最后一个可用版本（`v0.2.1`）
-> 与随后的 0.2.1 适配改动（改用上游原生逐工具开关、删除自带 `tool-gate` 插件），
-> 供追溯与参考。
+> 本包当初存在的两个理由都不成立了，因此不再发版。最后一个版本是 `v0.3.0`：它改用上游原生的
+> 逐工具开关、删除了本包自带的 `tool-gate` 插件，并带上这份废弃声明。下文描述的就是 `v0.3.0`。
 
 面向改这个仓库的人，不是给安装者的。用户文档见 [README.md](README.md) / [README.zh.md](README.zh.md)。
 
@@ -86,7 +85,7 @@ context** 上 `tools.restrict({ deny: ['read','write','edit'] })` 把不要的�
 
 ## 发版约定
 
-- `package.json` 的 `version` 与 tag 同名（例如 `0.2.1` ↔ `v0.2.1`）。
+- `package.json` 的 `version` 与 tag 同名（例如 `0.3.0` ↔ `v0.3.0`）。
 - 两版 README 的安装 spec 用同一个 tag；改文档也要一起发布，否则用户装 `#旧tag` 看到的还是旧文档。
 - 发布前：`sync.mjs` 后 `git diff` 必须为空（除非本次确实改了生成物），`check.mjs` 无漂移，`verify.mjs` 全绿。
 - 推送：`git push -u origin main && git push origin v<version>`。

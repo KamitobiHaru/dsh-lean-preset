@@ -16,7 +16,7 @@ Both are now upstream's job, so there is nothing left for this bundle to contrib
 - The official `minimal` preset, for the same two-tool surface with the harness's own compaction defaults.
 - [`dsh-compaction-tune`](https://github.com/KamitobiHaru/dsh-compaction-tune)'s **「高性能精简」** (`high-performance-minimal`) preset, if you want the same minimal tool surface *plus* a compaction policy you can tune through environment variables.
 
-The rest of this document describes the last working release (`v0.2.1`) and is kept for reference.
+The rest of this document describes the last release (`v0.3.0`) and is kept for reference.
 
 ## What it was
 
@@ -41,7 +41,7 @@ That is **fixed request overhead**, not conversation history — history is the 
 ## Install
 
 ```sh
-dsh plugin --profile web add github:KamitobiHaru/dsh-lean-preset#v0.2.1
+dsh plugin --profile web add github:KamitobiHaru/dsh-lean-preset#v0.3.0
 # then restart dsh web
 ```
 
@@ -134,7 +134,7 @@ The persistent shell's description already documents this recipe; do not wait on
 The preset stores nothing of its own, so upgrading means installing the newer tag over the old one and restarting:
 
 ```sh
-dsh plugin --profile web add github:KamitobiHaru/dsh-lean-preset#v0.2.1
+dsh plugin --profile web add github:KamitobiHaru/dsh-lean-preset#v0.3.0
 # then restart dsh web
 ```
 
@@ -153,6 +153,7 @@ Version history:
 | `0.1.0` | First release; compaction defaulted to `0.4` / `0.05` and read the shared `HARNESS_COMPACTION_*` variables |
 | `0.2.0` | Compaction follows the harness defaults and reads only the two `HARNESS_LEAN_*` variables |
 | `0.2.1` | Docs: English + Chinese READMEs, upgrade and uninstall sections; no runtime change |
+| `0.3.0` | Final release: uses the shipped per-tool switch instead of the bundle-local `tool-gate`, and carries the deprecation notice |
 
 ## Uninstall
 

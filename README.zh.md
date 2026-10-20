@@ -16,7 +16,7 @@
 - 官方 `minimal` 预设 —— 同样的两个工具，用系统自己的压缩默认值。
 - [`dsh-compaction-tune`](https://github.com/KamitobiHaru/dsh-compaction-tune) 的 **「高性能精简」**（`high-performance-minimal`）预设 —— 同样的极简工具面，但压缩策略可以用环境变量调。
 
-本文其余部分描述的是最后一个可用版本（`v0.2.1`），保留作参考。
+本文其余部分描述的是最后一个版本（`v0.3.0`），保留作参考。
 
 ## 它曾经是什么
 
@@ -39,7 +39,7 @@
 ## 安装
 
 ```sh
-dsh plugin --profile web add github:KamitobiHaru/dsh-lean-preset#v0.2.1
+dsh plugin --profile web add github:KamitobiHaru/dsh-lean-preset#v0.3.0
 # 装完重启 dsh web
 ```
 
@@ -132,7 +132,7 @@ grep -n error /tmp/build.log
 本包不保存任何自己的数据，升级就是「用新 tag 覆盖旧的，然后重启」：
 
 ```sh
-dsh plugin --profile web add github:KamitobiHaru/dsh-lean-preset#v0.2.1
+dsh plugin --profile web add github:KamitobiHaru/dsh-lean-preset#v0.3.0
 # 装完重启 dsh web
 ```
 
@@ -151,6 +151,7 @@ dsh plugin --profile web add github:KamitobiHaru/dsh-lean-preset#v0.2.1
 | `0.1.0` | 首个版本；压缩默认 `0.4` / `0.05`，并读取共用的 `HARNESS_COMPACTION_*` 变量 |
 | `0.2.0` | 压缩改用系统默认策略，并只读上面两个 `HARNESS_LEAN_*` 变量 |
 | `0.2.1` | 文档：中英双 README、升级与卸载说明；运行行为无变化 |
+| `0.3.0` | 最终版：改用上游逐工具开关替代本包自带的 `tool-gate`，并加入废弃声明 |
 
 ## 卸载
 
